@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>君が代 - カスタム版</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #fff;
+            color: #000;
+            font-family: 'serif';
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #wrapper { position: relative; width: 1200px; }
+        #hud { height: 20px; }
+        canvas {
+            display: block;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            background-color: #fff;
+        }
+        #controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 20px;
+            z-index: 100;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            font-family: 'serif';
+            background: #f0f0f0;
+            border: 1px solid #999;
+            border-radius: 4px;
+        }
+        button:hover { background: #e0e0e0; }
+    </style>
+</head>
+<body>
+<div id="wrapper">
+    <div id="hud"></div>
+    <canvas id="gameCanvas" width="1200" height="700"></canvas>
+    <div id="controls">
+        <button id="rewindBtn">10秒巻き戻し</button>
+        <button id="forwardBtn">10秒早送り</button>
+    </div>
+</div>
+
+<script>
+// --- 設定・ファイル名 ---
+const OFFSET = 0.0; 
+const AUDIO_FILE = "君が代.MP3.mp3"; 
+const clapImg = new Image();
+clapImg.src = "手拍子.png";
+
+const donImg = new Image();
+donImg.src = "どんどん.png"; 
+
+// 指定されたノーツ位置（パンとドンを交互に設定）
+let CHART_DATA = [
+    { time: 11.110, don: false }, 
+    { time: 20.512, don: true }, 
+    { time: 22.544, don: false }, 
+    { time: 24.622, don: true },
+    { time: 27.190, don: false }, 
+    { time: 29.634, don: true }, 
+    { time: 31.990, don: false }, 
+    { time: 34.259, don: true }, 
+    { time: 36.585, don: false }, 
+    { time: 39.643, don: true }, 
+    { time: 41.734, don: false }, 
+    { time: 43.926, don: true }, 
+    { time: 46.616, don: false }, 
+    { time: 49.437, don: true }, 
+    { time: 51.808, don: false }, 
+    { time: 54.515, don: true }, 
+    { time: 56.760, don: false }, 
+    { time: 59.475, don: true },
+    { time: 62.000, don: false }
+];
+
+const NOTE_SPEED = 350; 
+const TARGET_X = 200;
+const LANE_Y_TOP = 150;
+const LANE_Y_BOTTOM = 500;
+const LANES = [LANE_Y_TOP, LANE_Y_BOTTOM];
+const NOTE_R = 90; 
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const bgm = new Audio(AUDIO_FILE);
+
+let chart = [];
+let state = 'title'; 
+let particles = [];
+let panEffects = [];
+
+function buildChart() {
+    return CHART_DATA.map(d => ({ time: d.time + OFFSET, don: !!d.don, hit: false }))
+                    .sort((a, b) => a.time - b.time);
+}
+
+class Particle {
+    constructor(x, y, color) {
+        this.x = x; this.y = y;
+        const angle = Math.random() * Math.PI * 2;
+        const speed = Math.random() * 6;
+        this.vx = Math.cos(angle) * speed; 
+        this.vy = Math.sin(angle) * speed;
+        this.life = 1.0; this.decay = 0.02; this.color = color;
+    }
+    update() {
+        this.x += this.vx; this.y += this.vy;
+        this.vy += 0.05; this.life -= this.decay;
+    }
+    draw() {
+        ctx.save();
+        ctx.globalAlpha = this.life;
+        ctx.fillStyle = this.color;
+        ctx.beginPath(); ctx.arc(this.x, this.y, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+    }
+}
+
+function createFirework(x, y) {
+    const colors = ['#bc002d', '#ffd700', '#000'];
+    for (let i = 0; i < 20; i++) {
+        particles.push(new Particle(x, y, colors[Math.floor(Math.random() * colors.length)]));
+    }
+}
+
+function drawBackground() {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.beginPath();
+    ctx.arc(canvas.width / 2, canvas.height / 2, 250, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(188, 0, 45, 0.1)"; 
+    ctx.fill();
+}
+
+function gameLoop() {
+    const now = bgm.currentTime;
+    drawBackground();
+
+    ctx.save();
+    ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+    ctx.font = "bold 40px 'Courier New', monospace";
+    ctx.textAlign = "right";
+    ctx.fillText(now.toFixed(3) + "s", canvas.width - 30, 60);
+    ctx.restore();
+
+    particles = particles.filter(p => p.life > 0);
+    particles.forEach(p => { p.update(); p.draw(); });
+
+    // --- 判定箇所の描画（黒色に変更してわかりやすく） ---
+    LANES.forEach(laneY => {
+        ctx.beginPath(); 
+        ctx.arc(TARGET_X, laneY, NOTE_R + 8, 0, Math.PI*2);
+        // 枠線を濃い黒色、線を少し太くして強調
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 6; 
+        ctx.stroke();
+        
+        // 内側に薄いグレーを塗り、判定ゾーンを視認しやすくする
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+        ctx.fill();
+    });
+
+    if (state === 'play' || state === 'pause') {
+        if (now < 3.0) {
+            ctx.save();
+            ctx.fillStyle = "black";
+            ctx.textAlign = "center";
+            ctx.font = "bold 60px 'Hiragino Mincho ProN', 'MS Mincho', serif";
+            ctx.fillText("君が代", canvas.width / 2, canvas.height / 2 - 20);
+            ctx.font = "24px serif";
+            ctx.fillText("日本国国歌", canvas.width / 2, canvas.height / 2 + 50);
+            ctx.restore();
+        }
+
+        chart.forEach(n => {
+            if (!n.hit && now >= n.time) {
+                n.hit = true;
+                panEffects.push({ born: now, don: !!n.don, hitTime: n.time });
+                createFirework(TARGET_X, (LANE_Y_TOP + LANE_Y_BOTTOM)/2);
+            }
+            if (n.hit) return;
+            const x = TARGET_X + (n.time - now) * NOTE_SPEED;
+            if (x > -100 && x < canvas.width + 100) {
+                const img = n.don ? donImg : clapImg;
+                LANES.forEach(laneY => {
+                    if (img.complete && img.naturalWidth !== 0) {
+                        ctx.drawImage(img, x - NOTE_R, laneY - NOTE_R, NOTE_R * 2, NOTE_R * 2);
+                    } else {
+                        ctx.beginPath(); ctx.arc(x, laneY, NOTE_R, 0, Math.PI*2);
+                        ctx.fillStyle = n.don ? '#bc002d' : '#999';
+                        ctx.fill();
+                    }
+                });
+            }
+        });
+        
+        panEffects = panEffects.filter(e => (now - e.born) < 0.6);
+        panEffects.forEach(e => {
+            const age = now - e.born;
+            const alpha = 1 - (age / 0.6);
+            const centerY = (LANE_Y_TOP + LANE_Y_BOTTOM) / 2;
+            ctx.save();
+            ctx.globalAlpha = Math.max(0, alpha);
+            ctx.textAlign = "center"; 
+            ctx.fillStyle = e.don ? "#bc002d" : "#666";
+            ctx.font = "bold 60px serif";
+            const txt = e.don ? "ドン！" : "パン！";
+            ctx.fillText(txt, TARGET_X, centerY);
+            ctx.restore();
+        });
+
+        if (state === 'pause') {
+            ctx.fillStyle = "rgba(255,255,255,0.7)"; ctx.fillRect(0,0,canvas.width, canvas.height);
+            ctx.fillStyle = "black"; ctx.font = "30px serif"; ctx.textAlign = "center";
+            ctx.fillText("一時停止", canvas.width/2, canvas.height/2);
+        }
+        if (bgm.ended) state = 'end';
+    } else if (state === 'title') {
+        ctx.fillStyle = "black"; ctx.textAlign = "center"; ctx.font = "24px serif";
+        ctx.fillText("【君が代】 Enterキーで開始", canvas.width/2, canvas.height/2);
+    }
+    requestAnimationFrame(gameLoop);
+}
+
+function skipTime(seconds) {
+    bgm.currentTime = Math.max(0, Math.min(bgm.duration || 100, bgm.currentTime + seconds));
+    chart.forEach(n => { n.hit = (bgm.currentTime >= n.time); });
+    panEffects = [];
+}
+
+document.getElementById('rewindBtn').addEventListener('click', () => skipTime(-10));
+document.getElementById('forwardBtn').addEventListener('click', () => skipTime(10));
+
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        if (state === 'title' || state === 'end') {
+            chart = buildChart();
+            panEffects = []; particles = [];
+            bgm.currentTime = 0; 
+            bgm.play().catch(err => console.error("再生失敗:", err));
+            state = 'play';
+        }
+    }
+    if (e.key === ' ' && (state === 'play' || state === 'pause')) {
+        e.preventDefault();
+        if (state === 'play') { bgm.pause(); state = 'pause'; }
+        else { bgm.play(); state = 'play'; }
+    }
+});
+
+window.addEventListener('mousedown', (e) => {
+    if (e.target.tagName !== 'BUTTON' && bgm.paused && state === 'play') bgm.play();
+});
+
+gameLoop();
+</script>
+</body>
+</html>
